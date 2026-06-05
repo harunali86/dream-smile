@@ -1,65 +1,95 @@
-import Image from "next/image";
+'use client';
+
+import React, { useState, useCallback } from 'react';
+import dynamic from 'next/dynamic';
+import VeneerSelector from '@/components/UI/VeneerSelector';
+import ComparisonModal from '@/components/UI/ComparisonModal';
+
+const SmileGenerator = dynamic(() => import('@/components/SmileGenerator'), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-full flex items-center justify-center text-white">
+      <div className="animate-pulse text-lg">Loading...</div>
+    </div>
+  ),
+});
+
+interface ComparisonData {
+  original: string;
+  generated: string;
+  provider?: string;
+  isDemo?: boolean;
+  debug?: string;
+}
 
 export default function Home() {
+  const [selectedVeneer, setSelectedVeneer] = useState<string>('hollywood');
+  const [comparison, setComparison] = useState<ComparisonData | null>(null);
+
+  const handleResult = useCallback((
+    original: string,
+    generated: string,
+    meta?: { provider?: string; isDemo?: boolean; debug?: string }
+  ) => {
+    setComparison({
+      original,
+      generated,
+      provider: meta?.provider,
+      isDemo: meta?.isDemo,
+      debug: meta?.debug,
+    });
+  }, []);
+
+  const handleCloseComparison = useCallback(() => {
+    setComparison(null);
+  }, []);
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <main className="flex min-h-screen flex-col bg-gradient-to-b from-gray-950 via-gray-900 to-black relative">
+      {/* Header */}
+      <header className="sticky top-0 z-40 p-4 bg-black/60 backdrop-blur-xl border-b border-white/5">
+        <div className="max-w-md mx-auto w-full flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-medium text-white tracking-wide">
+              Smile Solution
+            </h1>
+            <p className="text-[10px] text-white/40 uppercase tracking-[0.2em] font-medium">
+              AI Veneer Visualizer
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="px-2.5 py-1 bg-green-500/10 text-green-400 text-[10px] font-semibold rounded-full border border-green-500/20">
+              AI Powered
+            </span>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col justify-center pt-8 pb-40">
+        <SmileGenerator
+          selectedStyle={selectedVeneer}
+          onResult={handleResult}
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+      </div>
+
+      {/* Veneer Style Selector */}
+      <VeneerSelector
+        selectedVeneer={selectedVeneer}
+        onSelect={setSelectedVeneer}
+      />
+
+      {/* Comparison Modal */}
+      {comparison && (
+        <ComparisonModal
+          original={comparison.original}
+          generated={comparison.generated}
+          provider={comparison.provider}
+          isDemo={comparison.isDemo}
+          debug={comparison.debug}
+          onClose={handleCloseComparison}
+        />
+      )}
+    </main>
   );
 }

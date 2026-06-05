@@ -1,0 +1,40 @@
+wing: dreamsmile_ai
+rooms:
+- name: backend
+  description: Files from services/
+  keywords:
+  - backend
+  - services
+- name: lib
+  description: Files from lib/
+  keywords:
+  - lib
+  - lib
+- name: scripts
+  description: Files from utils/
+  keywords:
+  - scripts
+  - utils
+- name: public
+  description: Files from public/
+  keywords:
+  - public
+  - public
+- name: app
+  description: Files from app/
+  keywords:
+  - app
+  - app
+- name: frontend
+  description: Files from components/
+  keywords:
+  - frontend
+  - components
+- name: context
+  description: Files from context/
+  keywords:
+  - context
+  - context
+- name: general
+  description: Files that don't fit other rooms
+  keywords: []
