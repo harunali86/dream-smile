@@ -3,18 +3,31 @@
 > **Last Updated:** 2026-06-05T16:00 IST
 
 ## Active Issues
-
+ 
 ### ISSUE-003: HF Space Network Flakiness
 - **Severity:** LOW
 - **Status:** MITIGATED
 - **Description:** Hugging Face Space connections can timeout (ETIMEDOUT / fetch failed)
 - **Mitigation:** Global fetch interceptor with 5 retries + 2s delay already active in gradioAdapter.ts
+ 
+### ISSUE-004: Insufficient Tooth Straightening / Veneer Alignment Quality
+- **Severity:** HIGH
+- **Status:** ACTIVE
+- **Description:** Generated veneers are not sufficiently straightened; crooked and overlapping tooth geometries in the original image are preserved in the output rather than being transformed into a perfect "Hollywood dream smile" aesthetic.
+- **Root Cause:**
+  1. **Overly Restrictive Prompts:** Prompt directives like "preserve smile geometry" or "preserve natural lip contour" overly constrain FLUX's generative capacity, forcing it to stick to the original tooth outlines.
+  2. **Tight Mask Boundaries:** The mask contours may be too restrictive, leaving no space for the model to re-align or expand the teeth boundaries without violating the mask edges.
+  3. **Lack of Strength Control:** The FLUX.1 Fill Space API lacks a standard denoise strength parameter, causing it to rely strictly on the mask and text prompt alignment.
+- **Proposed Remediation:**
+  1. Simplify and refine prompts to explicitly instruct straightening: "perfectly straight, aligned, white Hollywood veneers".
+  2. Test a wider dentition-masking technique that covers the whole dental arch, giving the model more space to redraw teeth positions.
 
 ### BYPASS-001: Preflight Validation Disabled (Local Development)
 - **Severity:** NONE (Intentional)
 - **Status:** ACTIVE
 - **Description:** The automated image validation pipeline (`runInputPreflight`) is commented out in `services/imageService.ts` to allow frictionless local development and custom testing.
 - **Remediation:** Uncomment lines 385–402 in `services/imageService.ts` to re-enable production-level teeth presence and clarity validation.
+
 
 ## Resolved Issues
 
@@ -66,4 +79,11 @@
   `return buildSafeCentralDentalMask(width, height, faceBox) ?? best.dataUrl;`
   Since `buildSafeCentralDentalMask` is a helper function that returns a fallback static central ellipse mask (~1.42% coverage) and is never `null`, the dynamically scanned mouth mask `best.dataUrl` (~29.61% coverage) was completely discarded. The tiny static ellipse did not cover the teeth, causing zero edits.
 - **Fix:** Corrected the return inside `buildFallbackMouthMask` in `utils/masking.ts` to return `best.dataUrl` directly. This enables the dynamically scanned mouth mask to be sent to the serverless FLUX model, enabling successful closeup veneer generation.
+
+### RESOLVED-009: Piranha Teeth and Aggressive Gum Deletions
+- **Fixed:** 2026-06-09
+- **Description:** AI-generated teeth appeared jagged, pointed, or cut off ("piranha teeth"), and natural gums were aggressively erased during mask processing.
+- **Root Cause:** The `applyLipSafeMaskCleanup` logic used rough chroma checks (`chr > 55`) that misclassified gums and teeth edges as lips, deleting them from the mask. Reverting occurred due to an aggressive 30% survival threshold, and the 0.24 blur sigma was below sharp's warning limit. Additionally, `adaptMaskForAnalysis`'s output was not being piped to the inpainting model, and closeups were rejected due to a low 38% maximum coverage cap.
+- **Fix:** Refined color classification (`isReddish`, `toothLike`, `cavityLike`), lowered survival limit to 0.05, and bumped blur sigma to 0.3. Raised closeup coverage caps (to 80% for `teeth_only` / 50% for `mouth_closeup`) and ensured `adaptMaskForAnalysis`'s output is passed to the inpainting model inside `generateVeneerImage`.
+
 

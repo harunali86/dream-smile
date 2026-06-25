@@ -121,5 +121,26 @@
   1. Prevents service interruption due to budget limits.
   2. Ensures that development and debugging cycles can be completed without incurring actual out-of-pocket costs.
 
+## ADR-011: Refined Teeth Mask Cleanup Optimization
+- **Date:** 2026-06-09
+- **Status:** APPROVED & IMPLEMENTED
+- **Context:** Gums and teeth contours were being deleted or degraded, resulting in jagged "piranha teeth" shapes.
+- **Decision:**
+  1. Refine the RGB color classification inside `applyLipSafeMaskCleanup`:
+     - Classify reddish/lip pixels: `isReddish = r > g + 14 && r > b + 14 && (g / (r + 0.001) < 0.75)`
+     - Classify tooth-like pixels: `toothLike = lum > 50 && (g / (r + 0.001) >= 0.72) && chr < 80`
+     - Classify dark cavity regions: `cavityLike = lum < 102 && chr < 45 && !isReddish`
+     - Remove pixels that are reddish OR are neither tooth-like nor cavity-like.
+  2. Lower the survival ratio check to `0.05` to prevent false reverting to the aggressive uncleaned mask.
+  3. Increase the sharp blur sigma to `0.3` to meet the minimum threshold requirements of the Sharp image library (avoiding errors/warnings).
+  4. Update `getTargetCoveragePct` maximum coverage limit values (up to 80% for `teeth_only` and 50% for `mouth_closeup`) to accommodate close-up images.
+  5. Ensure that the adapted mask resulting from `adaptMaskForAnalysis` is actually used in `generateVeneerImage` when making the model call.
+- **Rationale:**
+  1. Precise color classification prevents natural pink gums and teeth edges from being classified as lips and wiped out.
+  2. Raising the coverage limit and blur sigma ensures compatibility with closeups and avoids library warnings.
+  3. Passing the adapted mask to the inpainting model guarantees the optimized mask is used.
+- **Result:** Successfully validated; prevents jagged teeth shape and protects natural gum structure while cleanly removing lip overlaps.
+
+
 
 

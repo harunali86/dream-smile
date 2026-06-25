@@ -2,7 +2,7 @@ import sharp from 'sharp';
 import fs from 'fs';
 import path from 'path';
 
-const API_ENDPOINT = 'http://localhost:3001/api/v1/generate';
+const API_ENDPOINT = 'http://127.0.0.1:3000/api/v1/generate';
 const BASE_DIR = '/home/harun/block/dreamsmile-ai';
 
 async function main() {

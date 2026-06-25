@@ -5,7 +5,7 @@
  * Uses provider-first generation and deterministic cavity fallback for reliability.
  */
 import sharp from 'sharp';
-import { Client, handle_file } from '@gradio/client';
+import { Client } from '@gradio/client';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import dns from 'node:dns';
@@ -369,9 +369,9 @@ function buildAdaptiveThresholdedAlpha(
         pipeline = pipeline.dilate(1);
     }
 
-    const blur = variant === 'tight' ? 0.28 : variant === 'loose' ? 0.42 : 0.34;
+    const blur = variant === 'tight' ? 0.3 : variant === 'loose' ? 0.42 : 0.34;
     const threshold = variant === 'loose' ? 24 : 28;
-    return pipeline.blur(blur).threshold(threshold);
+    return pipeline.blur(blur).threshold(threshold).grayscale().extractChannel(0);
 }
 
 async function applyLipSafeMaskCleanup(
@@ -397,11 +397,11 @@ async function applyLipSafeMaskCleanup(
 
         const lum = luminance(r, g, b);
         const chr = chroma(r, g, b);
-        const lipLike = isLikelyLipColor(r, g, b, lum) && chr > 55;
-        const toothLike = lum >= 56 && lum <= 230 && chr < 45;
-        const cavityLike = lum < 102 && chr < 40;
+        const isReddish = r > g + 14 && r > b + 14 && (g / (r + 0.001) < 0.75);
+        const toothLike = lum > 50 && (g / (r + 0.001) >= 0.72) && chr < 80;
+        const cavityLike = lum < 102 && chr < 45 && !isReddish;
 
-        if (lipLike && !toothLike && !cavityLike) {
+        if (isReddish && !toothLike && !cavityLike) {
             cleaned[j] = 0;
         }
     }
@@ -412,35 +412,39 @@ async function applyLipSafeMaskCleanup(
         if (cleaned[j] >= 12) survivingCount++;
     }
 
-    // If lip cleanup removed more than 70% of the mask, it was too aggressive.
+    // If lip cleanup removed more than 95% of the mask, it was too aggressive.
     // Return the original mask to prevent collapsing to near-zero coverage.
     const survivalRatio = originalCount > 0 ? survivingCount / originalCount : 1;
-    if (survivalRatio < 0.30) {
+    if (survivalRatio < 0.05) {
         console.warn(
             `[LipSafe] Cleanup too aggressive: ${originalCount}→${survivingCount} px ` +
             `(${(survivalRatio * 100).toFixed(1)}% survived). Returning original mask.`
         );
         return sharp(alphaMask, { raw: { width, height, channels: 1 } })
-            .blur(0.24)
+            .blur(0.3)
             .threshold(28)
+            .grayscale()
+            .extractChannel(0)
             .raw()
             .toBuffer();
     }
 
     // Only apply light smoothing, NO erosion — erosion was destroying valid mask pixels
     return sharp(cleaned, { raw: { width, height, channels: 1 } })
-        .blur(0.24)
+        .blur(0.3)
         .threshold(28)
+        .grayscale()
+        .extractChannel(0)
         .raw()
         .toBuffer();
 }
 
 function getTargetCoveragePct(context: MouthContext): { min: number; ideal: number; max: number } {
     if (context === 'teeth_only') {
-        return { min: 1.6, ideal: 8.8, max: 30 };
+        return { min: 1.6, ideal: 8.8, max: 80 };
     }
     if (context === 'mouth_closeup') {
-        return { min: 0.7, ideal: 4.6, max: 21 };
+        return { min: 0.7, ideal: 4.6, max: 50 };
     }
     return { min: 0.08, ideal: 1.2, max: 9.5 };
 }
@@ -492,7 +496,7 @@ async function adaptMaskForAnalysis(
         }
 
         const coverage = (covered / (width * height)) * 100;
-        if (coverage < 0.03 || coverage > 38) {
+        if (coverage < 0.03 || coverage > targetCoverage.max * 1.1) {
             continue;
         }
 
@@ -1397,9 +1401,9 @@ async function runFluxHFModel(
     const resizedMaskDataUrl = toDataUrl('image/png', resizedMaskBuf);
     await writeDebugImage('03-hf-full-mask', resizedMaskDataUrl);
 
-    // Convert data URLs to handled files for Gradio client v2.x
-    const imageFile = handle_file(resizedImageDataUrl);
-    const maskFile = handle_file(resizedMaskDataUrl);
+    // Convert data URLs to Blobs for Gradio client
+    const imageFile = new Blob([new Uint8Array(resizedImageBuf)], { type: 'image/png' });
+    const maskFile = new Blob([new Uint8Array(resizedMaskBuf)], { type: 'image/png' });
 
     // Build dental-specific prompt
     const analysisInstruction =
@@ -1425,20 +1429,24 @@ async function runFluxHFModel(
     const client = await Client.connect(FLUX_HF_SPACE, { token: hfToken as `hf_${string}` });
 
     // FLUX.1-Fill-dev optimal sweet-spot: guidance scale 15.0 - 35.0 (mapped from tuned.guidance)
-    const fluxGuidance = clamp(tuned.guidance * 3.0, 15.0, 35.0);
+    const fluxGuidance = clamp(tuned.guidance * 3.0, 1.5, 30.0);
     const fluxSteps = clamp(tuned.steps, 20, 28);
 
     console.log(`[Flux HF] Inference: ${requestWidth}x${requestHeight}, guidance=${fluxGuidance.toFixed(1)}, steps=${fluxSteps}`);
-    const result = await client.predict('/infer', [
-        { background: imageFile, layers: [maskFile] },   // ImageEditor
-        prompt,                                           // Prompt
-        attempt.seed,                                     // Seed
-        false,                                            // Randomize seed
-        requestWidth,                                     // Width
-        requestHeight,                                    // Height
-        fluxGuidance,                                     // Guidance Scale
-        fluxSteps,                                        // Inference Steps
-    ]);
+    const result = await client.predict('/infer', {
+        edit_images: {
+            background: imageFile,
+            layers: [maskFile],
+            composite: null,
+        },
+        prompt,
+        seed: attempt.seed,
+        randomize_seed: false,
+        width: requestWidth,
+        height: requestHeight,
+        guidance_scale: fluxGuidance,
+        num_inference_steps: fluxSteps
+    });
 
     // Extract result image — response is [ImageData{url,path}, seed]
     const resultData = result.data as unknown[];
@@ -1648,12 +1656,26 @@ export async function generateVeneerImage(
 ): Promise<GenerateOutput> {
     const analysis = await analyzeMouthRegion(input.imageBase64, input.maskBase64);
 
+    const adaptedMaskBase64 = await adaptMaskForAnalysis(
+        input.imageBase64,
+        input.maskBase64,
+        analysis
+    ).catch((err) => {
+        console.error('[generateVeneerImage] Failed to adapt mask:', err);
+        return input.maskBase64;
+    });
+
+    const workingInput: GenerateInput = {
+        ...input,
+        maskBase64: adaptedMaskBase64,
+    };
+
     const PRIMARY_PROVIDER = process.env.PRIMARY_IMAGE_PROVIDER || 'flux_modal';
     const attempt = pickTrialSafeAttempt(analysis.mode, analysis);
 
     if (PRIMARY_PROVIDER === 'flux_hf') {
         console.log(`[generateVeneerImage] Executing flux_hf directly...`);
-        const fluxResult = await runFluxHFModel(input, attempt, analysis);
+        const fluxResult = await runFluxHFModel(workingInput, attempt, analysis);
         return {
             imageUrl: fluxResult.imageUrl,
             provider: 'flux_hf:FLUX.1-Fill-dev:native',
@@ -1663,7 +1685,7 @@ export async function generateVeneerImage(
     }
 
     console.log(`[generateVeneerImage] Executing flux_modal directly...`);
-    const fluxResult = await runFluxModalModel(input, attempt, analysis);
+    const fluxResult = await runFluxModalModel(workingInput, attempt, analysis);
     return {
         imageUrl: fluxResult.imageUrl,
         provider: 'flux_modal:FLUX.1-Fill-dev:native',
