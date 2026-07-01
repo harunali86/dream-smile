@@ -7,7 +7,7 @@ import { generateVeneerImage } from '@/lib/gradioAdapter';
 import sharp from 'sharp';
 
 // GEMINI Rule 5.2 — Whitelist allowed values
-const ALLOWED_STYLES = ['hollywood', 'natural', 'pearl', 'ivory'] as const;
+const ALLOWED_STYLES = ['hollywood', 'natural', 'ivory'] as const;
 type VeneerStyle = typeof ALLOWED_STYLES[number];
 
 // GEMINI Rule 6.3 — MIME type whitelist
@@ -281,10 +281,9 @@ async function runInputPreflight(
  */
 function buildPrompt(style: VeneerStyle): { prompt: string; negativePrompt: string } {
     const styleMap: Record<VeneerStyle, string> = {
-        hollywood: 'Hollywood White veneers, bright premium smile design, highly symmetrical arch',
-        natural: 'Natural White veneers, realistic shade, subtle micro-variation for believable result',
-        pearl: 'Pearl White veneers, luminous enamel glow, elegant cosmetic finish',
-        ivory: 'Ivory tone veneers, warm natural shade, premium conservative smile makeover',
+        hollywood: 'Ultra-white BL1 shade porcelain veneers, high-brightness cool-toned brilliant white enamel, maximum whitening with blue-white undertone, dazzling Hollywood celebrity smile',
+        natural: 'Natural A1/B1 shade veneers, subtle warm undertone with realistic enamel translucency, slight yellow-cream sub-surface scattering, believable natural-looking white teeth',
+        ivory: 'Warm A2/A3 ivory shade veneers, golden-cream undertone, classic conservative smile makeover, noticeably warmer and darker than pure white, elegant understated cosmetic finish',
     };
 
     const basePrompt = 'Professional dental photography, close-up macro shot, extremely detailed 8k.';

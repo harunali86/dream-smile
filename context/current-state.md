@@ -1,11 +1,15 @@
 # DreamSmile AI — Current State
 
-> **Last Updated:** 2026-06-25T12:10 IST
+> **Last Updated:** 2026-07-01T12:48 IST
 
-## Active Task: Teeth Straightening & Veneer Alignment Quality Optimization
-**Phase:** INVESTIGATION & EXPERIMENTATION
-- **Goal:** Address quality issues where crooked/overlapping teeth remain crooked in the inpainted output.
-- **Next Steps:** Experiment with less restrictive prompts, wider masking of the whole dental arch, and alternative model parameters.
+## Active Task: Ectopic Canine Alignment & Teeth Length Optimization
+**Phase:** IN PROGRESS
+- **Goal:** Resolve quality issues where high ectopic canines (fangs) are not removed and lower teeth biting edges are clipped/shortened.
+- **Plan:**
+  - Expand horizontal mask clamping to `0.98` in `utils/masking.ts` to capture outer corners.
+  - Relax vertical mouth boundaries (outer guard to `1.04` and center-band ellipse to `1.12` height) to include teeth biting edges.
+  - Rely on `applyLipSafeMaskCleanup` for lip protection.
+
 
 ## Previous Task: Transition to Native Inpainting (Full-Image Inpainting)
 **Phase:** COMPLETED, VERIFIED & STABILIZED
@@ -28,7 +32,7 @@
 - ✅ Native inpainting pipeline implemented in `lib/gradioAdapter.ts` (resized full-image/mask inference)
 - ✅ Input transparent mask flattened onto black background for model compatibility
 - ✅ E2E API Verification completed successfully using native full-image inpainting (took 3.0min on cold start)
-- ✅ Styling variants (`natural`, `pearl`, `ivory`) fully supported under the new native pipeline
+- ✅ Styling variants (`hollywood`, `natural`, `ivory`) fully supported under the new native pipeline
 - ✅ DNS lookup interceptor configured to force IPv4 (`{ family: 4 }`) for `.modal.run` domains to mitigate NAT64/IPv6 fetch timeout issues
 - ✅ Closeup Mask Fallback Corrected: Verified that mouth-only dynamic masking correctly selects and returns the optimal detected teeth area candidate (`best.dataUrl`) instead of defaulting to a static central ellipse override.
 - ✅ Teeth Mask Cleanup Optimization: Replaced aggressive gum/lip erasure logic in `applyLipSafeMaskCleanup` with accurate color checks (`isReddish`, `toothLike`, `cavityLike`) to prevent "piranha teeth" (jagged contours) and preserve gums while cleanly erasing lip overlap. Updated coverage thresholds and enabled adapted masks in inpainting.

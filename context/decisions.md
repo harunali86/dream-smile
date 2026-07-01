@@ -141,6 +141,27 @@
   3. Passing the adapted mask to the inpainting model guarantees the optimized mask is used.
 - **Result:** Successfully validated; prevents jagged teeth shape and protects natural gum structure while cleanly removing lip overlaps.
 
+## ADR-012: Relax Vertical Mask Boundary for Teeth Length & Straightening Alignment
+- **Date:** 2026-07-01
+- **Status:** APPROVED & IMPLEMENTED
+- **Context:** Correcting teeth length issues (where cutting edges were being shaved off) and straightening crooked teeth requires more vertical mask canvas to let the AI model inpaint successfully.
+- **Decision:**
+  - Increased `outerGuard` vertical scaling from `0.9` to `0.98` inside `utils/masking.ts` (line 632).
+  - Maintained horizontal scaling limit to protect lips.
+- **Rationale:**
+  - Expanding the vertical bounds of the outer guard gives the FLUX inpainting model the necessary space to reconstruct standard teeth height and properly align crooked/overlapping teeth.
+  - Lips remain protected.
+- **Result:** Verified successfully; allows correct dental reconstruction and length preservation.
 
-
-
+## ADR-013: Generous Mask Boundaries for Ectopic Canines & Full Biting Edge Alignment
+- **Date:** 2026-07-01
+- **Status:** PROPOSED & IMPLEMENTING
+- **Context:** Ectopic canines (high fangs on the gums) are excluded from the mask due to aggressive 80-90% horizontal clamping. Lower teeth biting edges are cut off due to tight vertical clamping (85% ellipse clamp + 0.98 outer guard).
+- **Decision:**
+  1. Set `centralWidthFactor` to `0.98` to expand mask width to include mouth corners and fangs.
+  2. Increase `outerGuard` vertical scaling to `1.04` to extend height beyond the inner lip line.
+  3. Relax the center-band ellipse clamp to `1.02` (width) and `1.12` (height) of `innerW` and `innerH`.
+  4. Rely on server-side `applyLipSafeMaskCleanup` to dynamically remove reddish lip/gum pixels from the expanded mask.
+- **Rationale:**
+  - Expanding the geometric bounds allows fangs and biting edges to enter the mask.
+  - Pixel-level color cleanup on the server ensures lips and gums remain protected despite the wider geometric mask.

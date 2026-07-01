@@ -614,7 +614,7 @@ export async function generateMouthMask(
         const opennessRatio = innerH / innerW;
         const centerX = (minX + maxX) / 2;
         const centerY = (minY + maxY) / 2;
-        const centralWidthFactor = opennessRatio > 0.42 ? 0.9 : opennessRatio > 0.32 ? 0.85 : 0.8;
+        const centralWidthFactor = 0.98;
         const halfCentralWidth = (innerW * centralWidthFactor) / 2;
         const xMin = centerX - halfCentralWidth;
         const xMax = centerX + halfCentralWidth;
@@ -629,7 +629,7 @@ export async function generateMouthMask(
         const innerMask = scalePolygon(innerCentral, center, 1.15, opennessRatio > 0.38 ? 1.2 : 1.12);
 
         // Safety boundary: keep edits inside lip contour.
-        const outerGuard = scalePolygon(mouthOuterPoints, center, 0.94, 0.9);
+        const outerGuard = scalePolygon(mouthOuterPoints, center, 0.98, 1.04);
 
         ctx.fillStyle = 'white';
         drawPolygon(ctx, innerMask);
@@ -668,8 +668,8 @@ export async function generateMouthMask(
         ctx.ellipse(
             centerX,
             centerY,
-            Math.max(7, innerW * (opennessRatio > 0.4 ? 0.82 : 0.78)),
-            Math.max(5, innerH * 0.85),
+            Math.max(7, innerW * 1.02),
+            Math.max(5, innerH * 1.12),
             0,
             0,
             Math.PI * 2
