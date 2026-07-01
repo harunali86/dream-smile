@@ -1,10 +1,32 @@
-import * as faceapi from 'face-api.js';
+// Landmark indices for the mouth (outer and inner lips) in MediaPipe Face Mesh
+const MOUTH_OUTER_INDICES = [61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291, 375, 321, 405, 314, 17, 84, 181, 91, 146];
+const MOUTH_INNER_INDICES = [78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95];
 
-// Landmark indices for the mouth (outer and inner lips)
-// Outer lips: 48-59
-// Inner lips: 60-67
-const MOUTH_OUTER_INDICES = [48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59];
-const MOUTH_INNER_INDICES = [60, 61, 62, 63, 64, 65, 66, 67];
+let faceLandmarkerInstance: any = null;
+
+async function getFaceLandmarker(modelsPath: string = '/models'): Promise<any> {
+    if (faceLandmarkerInstance) {
+        return faceLandmarkerInstance;
+    }
+    
+    // Dynamic import to avoid SSR errors during Next.js build / server execution
+    const { FilesetResolver, FaceLandmarker } = await import('@mediapipe/tasks-vision');
+    
+    const wasmUrl = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8/wasm';
+    const filesetResolver = await FilesetResolver.forVisionTasks(wasmUrl);
+    const modelAssetPath = `${modelsPath}/face_landmarker.task`;
+
+    faceLandmarkerInstance = await FaceLandmarker.createFromOptions(filesetResolver, {
+        baseOptions: {
+            modelAssetPath: modelAssetPath,
+            delegate: 'GPU',
+        },
+        runningMode: 'IMAGE',
+        numFaces: 1,
+    });
+    
+    return faceLandmarkerInstance;
+}
 
 type Point = { x: number; y: number };
 
@@ -553,42 +575,46 @@ export async function generateMouthMask(
             return null;
         }
 
-        let detection: faceapi.WithFaceLandmarks<
-            { detection: faceapi.FaceDetection },
-            faceapi.FaceLandmarks68
-        > | null = null;
+        let landmarksPoints: Point[] = [];
         let faceBox: FaceBox | null = null;
 
         try {
-            await loadFaceApiModels(modelsPath);
-            const quickFace = await faceapi.detectSingleFace(
-                imageElement,
-                new faceapi.TinyFaceDetectorOptions()
-            );
-            if (quickFace?.box) {
+            const landmarker = await getFaceLandmarker(modelsPath);
+            const result = landmarker.detect(imageElement);
+
+            if (result && result.faceLandmarks && result.faceLandmarks.length > 0) {
+                const landmarks = result.faceLandmarks[0];
+                
+                const xs = landmarks.map((l: any) => l.x * width);
+                const ys = landmarks.map((l: any) => l.y * height);
+                const minX = Math.min(...xs);
+                const maxX = Math.max(...xs);
+                const minY = Math.min(...ys);
+                const maxY = Math.max(...ys);
+                
                 faceBox = {
-                    x: quickFace.box.x,
-                    y: quickFace.box.y,
-                    width: quickFace.box.width,
-                    height: quickFace.box.height,
+                    x: minX,
+                    y: minY,
+                    width: maxX - minX,
+                    height: maxY - minY,
                 };
+
+                landmarksPoints = landmarks.map((l: any) => ({
+                    x: l.x * width,
+                    y: l.y * height,
+                }));
             }
-            const detected = await faceapi
-                .detectSingleFace(imageElement, new faceapi.TinyFaceDetectorOptions())
-                .withFaceLandmarks();
-            detection = detected ?? null;
         } catch (modelError) {
-            console.warn('Face API unavailable. Falling back to mouth-only masking.', modelError);
+            console.warn('MediaPipe Face Landmarker unavailable. Falling back to mouth-only masking.', modelError);
         }
 
-        if (!detection) {
+        if (landmarksPoints.length === 0) {
             console.warn('No face detected for masking. Trying mouth-only fallback.');
             return buildFallbackMouthMask(imageElement, width, height, faceBox ?? undefined);
         }
 
-        const landmarks = detection.landmarks;
-        const mouthOuterPoints = MOUTH_OUTER_INDICES.map((i) => landmarks.positions[i]);
-        const mouthInnerPoints = MOUTH_INNER_INDICES.map((i) => landmarks.positions[i]);
+        const mouthOuterPoints = MOUTH_OUTER_INDICES.map((i) => landmarksPoints[i]);
+        const mouthInnerPoints = MOUTH_INNER_INDICES.map((i) => landmarksPoints[i]);
 
         if (mouthInnerPoints.length < 8 || mouthOuterPoints.length < 12) {
             console.warn('Incomplete mouth landmarks for mask generation.');
@@ -702,11 +728,4 @@ export async function generateMouthMask(
     }
 }
 
-async function loadFaceApiModels(path: string) {
-    if (!faceapi.nets.tinyFaceDetector.params) {
-        await faceapi.nets.tinyFaceDetector.loadFromUri(path);
-    }
-    if (!faceapi.nets.faceLandmark68Net.params) {
-        await faceapi.nets.faceLandmark68Net.loadFromUri(path);
-    }
-}
+// loadFaceApiModels removed in favor of getFaceLandmarker
