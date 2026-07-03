@@ -1433,20 +1433,32 @@ async function runFluxHFModel(
     const fluxSteps = clamp(tuned.steps, 20, 28);
 
     console.log(`[Flux HF] Inference: ${requestWidth}x${requestHeight}, guidance=${fluxGuidance.toFixed(1)}, steps=${fluxSteps}`);
-    const result = await client.predict('/infer', {
-        edit_images: {
-            background: imageFile,
-            layers: [maskFile],
-            composite: null,
-        },
-        prompt,
-        seed: attempt.seed,
-        randomize_seed: false,
-        width: requestWidth,
-        height: requestHeight,
-        guidance_scale: fluxGuidance,
-        num_inference_steps: fluxSteps
-    });
+    let result;
+    try {
+        result = await client.predict('/infer', {
+            edit_images: {
+                background: imageFile,
+                layers: [maskFile],
+                composite: null,
+            },
+            prompt,
+            seed: attempt.seed,
+            randomize_seed: false,
+            width: requestWidth,
+            height: requestHeight,
+            guidance_scale: fluxGuidance,
+            num_inference_steps: fluxSteps
+        });
+    } catch (predictError: any) {
+        let errMsg = '';
+        try {
+            errMsg = JSON.stringify(predictError, null, 2);
+        } catch {
+            errMsg = predictError instanceof Error ? predictError.message : String(predictError);
+        }
+        console.error('[Flux HF] predict() FAILED. Full error details:', errMsg);
+        throw predictError;
+    }
 
     // Extract result image — response is [ImageData{url,path}, seed]
     const resultData = result.data as unknown[];
@@ -1671,25 +1683,66 @@ export async function generateVeneerImage(
     };
 
     const PRIMARY_PROVIDER = process.env.PRIMARY_IMAGE_PROVIDER || 'flux_modal';
+    const ALLOW_FALLBACK = process.env.ALLOW_PROVIDER_FALLBACK !== 'false';
     const attempt = pickTrialSafeAttempt(analysis.mode, analysis);
 
     if (PRIMARY_PROVIDER === 'flux_hf') {
-        console.log(`[generateVeneerImage] Executing flux_hf directly...`);
-        const fluxResult = await runFluxHFModel(workingInput, attempt, analysis);
-        return {
-            imageUrl: fluxResult.imageUrl,
-            provider: 'flux_hf:FLUX.1-Fill-dev:native',
-            isDemo: false,
-            debug: fluxResult.debug,
-        };
+        try {
+            console.log(`[generateVeneerImage] Executing primary flux_hf...`);
+            const fluxResult = await runFluxHFModel(workingInput, attempt, analysis);
+            return {
+                imageUrl: fluxResult.imageUrl,
+                provider: 'flux_hf:FLUX.1-Fill-dev:native',
+                isDemo: false,
+                debug: fluxResult.debug,
+            };
+        } catch (err) {
+            console.error('[generateVeneerImage] primary flux_hf failed:', err);
+            if (ALLOW_FALLBACK) {
+                console.log('[generateVeneerImage] Falling back to secondary flux_modal...');
+                try {
+                    const fluxResult = await runFluxModalModel(workingInput, attempt, analysis);
+                    return {
+                        imageUrl: fluxResult.imageUrl,
+                        provider: 'flux_modal:FLUX.1-Fill-dev:fallback',
+                        isDemo: false,
+                        debug: fluxResult.debug,
+                    };
+                } catch (fallbackErr) {
+                    console.error('[generateVeneerImage] fallback to flux_modal failed:', fallbackErr);
+                    throw fallbackErr;
+                }
+            }
+            throw err;
+        }
+    } else {
+        try {
+            console.log(`[generateVeneerImage] Executing primary flux_modal...`);
+            const fluxResult = await runFluxModalModel(workingInput, attempt, analysis);
+            return {
+                imageUrl: fluxResult.imageUrl,
+                provider: 'flux_modal:FLUX.1-Fill-dev:native',
+                isDemo: false,
+                debug: fluxResult.debug,
+            };
+        } catch (err) {
+            console.error('[generateVeneerImage] primary flux_modal failed:', err);
+            if (ALLOW_FALLBACK) {
+                console.log('[generateVeneerImage] Falling back to secondary flux_hf...');
+                try {
+                    const fluxResult = await runFluxHFModel(workingInput, attempt, analysis);
+                    return {
+                        imageUrl: fluxResult.imageUrl,
+                        provider: 'flux_hf:FLUX.1-Fill-dev:fallback',
+                        isDemo: false,
+                        debug: fluxResult.debug,
+                    };
+                } catch (fallbackErr) {
+                    console.error('[generateVeneerImage] fallback to flux_hf failed:', fallbackErr);
+                    throw fallbackErr;
+                }
+            }
+            throw err;
+        }
     }
-
-    console.log(`[generateVeneerImage] Executing flux_modal directly...`);
-    const fluxResult = await runFluxModalModel(workingInput, attempt, analysis);
-    return {
-        imageUrl: fluxResult.imageUrl,
-        provider: 'flux_modal:FLUX.1-Fill-dev:native',
-        isDemo: false,
-        debug: fluxResult.debug,
-    };
 }

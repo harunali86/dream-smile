@@ -421,6 +421,7 @@ export async function generateSmileImage(
         };
     } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'AI image generation failed. Please try again.';
+        console.error('[generateSmileImage] Pipeline error:', message);
         return {
             success: false,
             error: {
