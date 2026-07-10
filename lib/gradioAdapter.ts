@@ -10,10 +10,18 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import dns from 'node:dns';
 
+interface GlobalDreamsmile {
+    __dns_modal_intercepted__?: boolean;
+    __hf_fetch_intercepted__?: boolean;
+    __dreamsmile_debug_dir__?: string;
+}
+
+const customGlobal = globalThis as typeof globalThis & GlobalDreamsmile;
+
 // Intercept DNS resolution for Modal domains to force IPv4 and prevent ETIMEDOUT errors
-if (!(globalThis as any).__dns_modal_intercepted__) {
+if (!customGlobal.__dns_modal_intercepted__) {
     const originalLookup = dns.lookup;
-    // @ts-ignore
+    // @ts-expect-error dns.lookup is read-only in types but writable at runtime
     dns.lookup = function(hostname, options, callback) {
         if (typeof options === 'function') {
             callback = options;
@@ -28,23 +36,25 @@ if (!(globalThis as any).__dns_modal_intercepted__) {
                 options = { family: 4 };
             }
         }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return (originalLookup as any).call(dns, hostname, options, callback);
     };
-    (globalThis as any).__dns_modal_intercepted__ = true;
+    customGlobal.__dns_modal_intercepted__ = true;
 }
 
 // Resilient Global Fetch Interceptor with automatic retries for flaky Hugging Face / Gradio networks
-if (!(globalThis as any).__hf_fetch_intercepted__) {
+if (!customGlobal.__hf_fetch_intercepted__) {
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = async (url: any, options: any) => {
+    globalThis.fetch = async (url: RequestInfo | URL, options?: RequestInit) => {
         const maxRetries = 5;
         const delay = 2000;
         for (let i = 0; i < maxRetries; i++) {
             try {
                 const res = await originalFetch(url, options);
                 return res;
-            } catch (err: any) {
-                console.warn(`[HF-FETCH RETRY ${i + 1}/${maxRetries}] ${url.toString()} -> Error:`, err.message || err);
+            } catch (err: unknown) {
+                const message = err instanceof Error ? err.message : String(err);
+                console.warn(`[HF-FETCH RETRY ${i + 1}/${maxRetries}] ${url.toString()} -> Error:`, message);
                 if (i === maxRetries - 1) {
                     throw err;
                 }
@@ -53,7 +63,7 @@ if (!(globalThis as any).__hf_fetch_intercepted__) {
         }
         return originalFetch(url, options);
     };
-    (globalThis as any).__hf_fetch_intercepted__ = true;
+    customGlobal.__hf_fetch_intercepted__ = true;
 }
 
 
@@ -168,9 +178,9 @@ async function writeDebugImage(name: string, dataUrl: string): Promise<void> {
     const parsed = parseDataUrl(dataUrl);
     const debugRoot = path.join(process.cwd(), 'debug-dumps');
     const dir =
-        (globalThis as any).__dreamsmile_debug_dir__ ??
+        customGlobal.__dreamsmile_debug_dir__ ??
         path.join(debugRoot, new Date().toISOString().replace(/[:.]/g, '-'));
-    (globalThis as any).__dreamsmile_debug_dir__ = dir;
+    customGlobal.__dreamsmile_debug_dir__ = dir;
     await fs.mkdir(dir, { recursive: true });
 
     const ext = parsed.mime === 'image/webp' ? 'webp' : parsed.mime === 'image/jpeg' ? 'jpg' : 'png';
@@ -604,7 +614,7 @@ function buildDefectInstruction(defects: DefectScores): string {
         {
             kind: 'misalignment',
             score: defects.misalignment,
-            text: 'Priority alignment correction: straighten visible tooth axes and preserve natural smile arc continuity.',
+            text: 'Priority alignment correction: straighten all teeth axes, align overlapping edges, and generate a symmetric, perfectly straight Hollywood dream smile.',
         },
         {
             kind: 'gaps',
@@ -1408,17 +1418,17 @@ async function runFluxHFModel(
     // Build dental-specific prompt
     const analysisInstruction =
         analysis.mode === 'reconstruct'
-            ? 'Reconstruct missing or broken teeth with realistic anatomy and preserve smile geometry.'
+            ? 'Reconstruct teeth with realistic anatomy, creating a perfectly straight, aligned, and symmetric Hollywood dream smile.'
             : analysis.mode === 'restore'
-                ? 'Restore misalignment, chips, and discoloration while preserving natural lip contour.'
-                : 'Apply subtle, realistic veneer improvements while keeping existing expression unchanged.';
+                ? 'Restore misalignment, chips, and discoloration, straightening and aligning the teeth into a seamless white Hollywood veneer smile.'
+                : 'Apply realistic veneer improvements, ensuring straight, symmetric, and bright white teeth.';
     const defectInstruction = buildDefectInstruction(analysis.defects);
 
     const prompt = [
-        'Photorealistic dental inpainting.',
-        'Align, restore, and whiten teeth strictly within the masked region.',
-        'Do not modify the shape of the mouth, lips, or surrounding face.',
-        'Keep lips, tongue, gums outside the mask, skin texture, lighting, expression, and background 100% unchanged, authentic, and seamlessly blended.',
+        'Photorealistic dental photography, 8k macro detail.',
+        'Generate perfectly straight, symmetric, aligned, and bright white porcelain veneers in the masked teeth region to form a gorgeous Hollywood dream smile.',
+        'Seamless edge blending: generated teeth must have smooth color and luminance transitions at mask boundaries with zero visible seams.',
+        'Preserve exact lip shape, gum contour, tongue, skin texture, lighting, expression, and background.',
         analysisInstruction,
         defectInstruction,
         attempt.boost,
@@ -1449,7 +1459,7 @@ async function runFluxHFModel(
             guidance_scale: fluxGuidance,
             num_inference_steps: fluxSteps
         });
-    } catch (predictError: any) {
+    } catch (predictError: unknown) {
         let errMsg = '';
         try {
             errMsg = JSON.stringify(predictError, null, 2);
@@ -1466,7 +1476,7 @@ async function runFluxHFModel(
         throw new Error('Flux HF returned no output image');
     }
 
-    const imgInfo = resultData[0] as any;
+    const imgInfo = resultData[0] as string | { url?: string; path?: string } | null | undefined;
     let hfGeneratedDataUrl: string;
 
     if (typeof imgInfo === 'string') {
@@ -1522,7 +1532,8 @@ async function runFluxModalModel(
     const maskDebugMeta = await sharp(originalMaskBuf).metadata();
     console.log(`[MASK DEBUG] Client mask: ${maskDebugMeta.width}x${maskDebugMeta.height}, channels=${maskDebugMeta.channels}, hasAlpha=${maskDebugMeta.hasAlpha}`);
     const {data: maskDebugRaw} = await sharp(originalMaskBuf).ensureAlpha().raw().toBuffer({resolveWithObject: true});
-    let dbgWhite=0, dbgAlphaGt0=0, dbgTotal=maskDebugMeta.width*maskDebugMeta.height;
+    let dbgWhite = 0, dbgAlphaGt0 = 0;
+    const dbgTotal = (maskDebugMeta.width ?? 0) * (maskDebugMeta.height ?? 0);
     for(let i=0; i<maskDebugRaw.length; i+=4) {
         if(maskDebugRaw[i]>128) dbgWhite++;
         if(maskDebugRaw[i+3]>0) dbgAlphaGt0++;
@@ -1585,17 +1596,17 @@ async function runFluxModalModel(
     // Build dental-specific prompt
     const analysisInstruction =
         analysis.mode === 'reconstruct'
-            ? 'Reconstruct missing or broken teeth with realistic anatomy and preserve smile geometry.'
+            ? 'Reconstruct teeth with realistic anatomy, creating a perfectly straight, aligned, and symmetric Hollywood dream smile.'
             : analysis.mode === 'restore'
-                ? 'Restore misalignment, chips, and discoloration while preserving natural lip contour.'
-                : 'Apply subtle, realistic veneer improvements while keeping existing expression unchanged.';
+                ? 'Restore misalignment, chips, and discoloration, straightening and aligning the teeth into a seamless white Hollywood veneer smile.'
+                : 'Apply realistic veneer improvements, ensuring straight, symmetric, and bright white teeth.';
     const defectInstruction = buildDefectInstruction(analysis.defects);
 
     const prompt = [
-        'Photorealistic dental inpainting.',
-        'Align, restore, and whiten teeth strictly within the masked region.',
-        'Do not modify the shape of the mouth, lips, or surrounding face.',
-        'Keep lips, tongue, gums outside the mask, skin texture, lighting, expression, and background 100% unchanged, authentic, and seamlessly blended.',
+        'Photorealistic dental photography, 8k macro detail.',
+        'Generate perfectly straight, symmetric, aligned, and bright white porcelain veneers in the masked teeth region to form a gorgeous Hollywood dream smile.',
+        'Seamless edge blending: generated teeth must have smooth color and luminance transitions at mask boundaries with zero visible seams.',
+        'Preserve exact lip shape, gum contour, tongue, skin texture, lighting, expression, and background.',
         analysisInstruction,
         defectInstruction,
         attempt.boost,

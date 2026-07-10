@@ -2,8 +2,36 @@
 const MOUTH_OUTER_INDICES = [61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291, 375, 321, 405, 314, 17, 84, 181, 91, 146];
 const MOUTH_INNER_INDICES = [78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95];
 
+if (typeof window !== 'undefined') {
+    const originalConsoleError = console.error;
+    console.error = function (...args: unknown[]) {
+        const msg = args.map(arg => String(arg)).join(' ');
+        if (
+            msg.includes('INFO: Created TensorFlow Lite') ||
+            msg.includes('XNNPACK delegate')
+        ) {
+            return;
+        }
+        originalConsoleError.apply(console, args);
+    };
+
+    const originalConsoleWarn = console.warn;
+    console.warn = function (...args: unknown[]) {
+        const msg = args.map(arg => String(arg)).join(' ');
+        if (
+            msg.includes('Sets FaceBlendshapesGraph acceleration') ||
+            msg.includes('OpenGL error checking')
+        ) {
+            return;
+        }
+        originalConsoleWarn.apply(console, args);
+    };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let faceLandmarkerInstance: any = null;
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function getFaceLandmarker(modelsPath: string = '/models'): Promise<any> {
     if (faceLandmarkerInstance) {
         return faceLandmarkerInstance;
@@ -12,18 +40,34 @@ async function getFaceLandmarker(modelsPath: string = '/models'): Promise<any> {
     // Dynamic import to avoid SSR errors during Next.js build / server execution
     const { FilesetResolver, FaceLandmarker } = await import('@mediapipe/tasks-vision');
     
-    const wasmUrl = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8/wasm';
+    // WASM version MUST match the installed @mediapipe/tasks-vision package version (0.10.35)
+    const wasmUrl = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm';
     const filesetResolver = await FilesetResolver.forVisionTasks(wasmUrl);
     const modelAssetPath = `${modelsPath}/face_landmarker.task`;
 
-    faceLandmarkerInstance = await FaceLandmarker.createFromOptions(filesetResolver, {
-        baseOptions: {
-            modelAssetPath: modelAssetPath,
-            delegate: 'GPU',
-        },
-        runningMode: 'IMAGE',
-        numFaces: 1,
-    });
+    // Try GPU first for best performance, fall back to CPU for mobile/low-end devices
+    try {
+        faceLandmarkerInstance = await FaceLandmarker.createFromOptions(filesetResolver, {
+            baseOptions: {
+                modelAssetPath: modelAssetPath,
+                delegate: 'GPU',
+            },
+            runningMode: 'IMAGE',
+            numFaces: 1,
+        });
+        console.log('[FaceLandmarker] Initialized with GPU delegate.');
+    } catch (gpuError) {
+        console.warn('[FaceLandmarker] GPU delegate failed, falling back to CPU:', gpuError);
+        faceLandmarkerInstance = await FaceLandmarker.createFromOptions(filesetResolver, {
+            baseOptions: {
+                modelAssetPath: modelAssetPath,
+                delegate: 'CPU',
+            },
+            runningMode: 'IMAGE',
+            numFaces: 1,
+        });
+        console.log('[FaceLandmarker] Initialized with CPU delegate (fallback).');
+    }
     
     return faceLandmarkerInstance;
 }
@@ -585,8 +629,8 @@ export async function generateMouthMask(
             if (result && result.faceLandmarks && result.faceLandmarks.length > 0) {
                 const landmarks = result.faceLandmarks[0];
                 
-                const xs = landmarks.map((l: any) => l.x * width);
-                const ys = landmarks.map((l: any) => l.y * height);
+                const xs = landmarks.map((l: { x: number }) => l.x * width);
+                const ys = landmarks.map((l: { y: number }) => l.y * height);
                 const minX = Math.min(...xs);
                 const maxX = Math.max(...xs);
                 const minY = Math.min(...ys);
@@ -599,7 +643,7 @@ export async function generateMouthMask(
                     height: maxY - minY,
                 };
 
-                landmarksPoints = landmarks.map((l: any) => ({
+                landmarksPoints = landmarks.map((l: { x: number; y: number }) => ({
                     x: l.x * width,
                     y: l.y * height,
                 }));
@@ -634,6 +678,9 @@ export async function generateMouthMask(
         const allPoints = [...mouthOuterPoints, ...mouthInnerPoints];
         const center = polygonCenter(allPoints);
 
+        const outerBounds = getBounds(mouthOuterPoints);
+        const outerH = Math.max(1, outerBounds.maxY - outerBounds.minY);
+
         const { minX, maxX, minY, maxY } = getBounds(mouthInnerPoints);
         const innerW = Math.max(1, maxX - minX);
         const innerH = Math.max(1, maxY - minY);
@@ -661,11 +708,14 @@ export async function generateMouthMask(
         drawPolygon(ctx, innerMask);
         ctx.fill();
 
+        // Use effective height scaling to prevent teeth clipping when mouth is nearly closed
+        const effectiveH = Math.max(innerH, outerH * 0.45);
+
         // Keep only center cavity connected for missing-teeth reconstruction.
         const ellipseCx = centerX;
         const ellipseCy = centerY + innerH * 0.02;
         const ellipseRx = Math.max(6, innerW * 0.52);
-        const ellipseRy = Math.max(5, innerH * 0.45);
+        const ellipseRy = Math.max(8, effectiveH * 0.45);
 
         ctx.beginPath();
         ctx.ellipse(ellipseCx, ellipseCy, ellipseRx, ellipseRy, 0, 0, Math.PI * 2);
@@ -673,9 +723,9 @@ export async function generateMouthMask(
 
         // Add upper/lower arch support so alignment fixes have enough cavity area.
         const archRx = Math.max(6, innerW * (opennessRatio > 0.4 ? 0.62 : 0.58));
-        const archRy = Math.max(4, innerH * (opennessRatio > 0.4 ? 0.32 : 0.3));
-        const upperCy = centerY - innerH * (opennessRatio > 0.4 ? 0.2 : 0.16);
-        const lowerCy = centerY + innerH * (opennessRatio > 0.4 ? 0.2 : 0.18);
+        const archRy = Math.max(10, effectiveH * (opennessRatio > 0.4 ? 0.32 : 0.3));
+        const upperCy = centerY - effectiveH * (opennessRatio > 0.4 ? 0.2 : 0.16);
+        const lowerCy = centerY + effectiveH * (opennessRatio > 0.4 ? 0.2 : 0.18);
 
         ctx.beginPath();
         ctx.ellipse(centerX, upperCy, archRx, archRy, 0, 0, Math.PI * 2);
@@ -689,13 +739,13 @@ export async function generateMouthMask(
         drawPolygon(ctx, outerGuard);
         ctx.fill();
 
-        // Final center-band clamp to avoid lip-corner edits.
+        // Final center-band clamp to avoid lip-corner edits, scaling with outerH to avoid clipping.
         ctx.beginPath();
         ctx.ellipse(
             centerX,
             centerY,
             Math.max(7, innerW * 1.02),
-            Math.max(5, innerH * 1.12),
+            Math.max(15, innerH * 1.35, outerH * 0.55),
             0,
             0,
             Math.PI * 2

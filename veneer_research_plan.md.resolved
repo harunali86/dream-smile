@@ -1,0 +1,91 @@
+# 🦷 DreamSmile AI — Veneer Preview Research & Development Plan
+
+This document outlines the comparative research and the recommended architectural plan for building a photorealistic, identity-preserving **virtual dental veneer try-on preview**.
+
+---
+
+## 🏛️ Executive Summary
+
+To solve the issues of **teeth shrinking, identity distortion, and skin color shift**, we must transition from pure generative AI to a **facially-driven, hybrid simulation pipeline**. The best approach combines **deterministic shape templates and warping** with **AI-driven texture refinement**.
+
+---
+
+## 📊 Comparison of Tech Approaches
+
+Below is a comparison of the tech approaches available in the market:
+
+### 1. Commercial Dental Try-On APIs (Dentrino, SmileCloud, Diagnocat, SmileFy)
+* **How it works**: Pre-packaged cloud services that process images and return smile designs.
+* **Why we cannot use them**: ❌ **No public API access.** These are enterprise-only, sales-led platforms. They require custom contract discussions and sales representatives to get access.
+* **Verdict**: **Not feasible for direct integration.**
+
+---
+
+### 2. Pure Generative Inpainting (FLUX.1-Fill / SDXL Inpaint)
+* **How it works**: The user uploads a photo, we generate a mouth mask, and the AI fills the mask with "white teeth" based on a prompt.
+* **Why it fails**: The model lacks geometric constraints. It does not understand the patient's existing tooth boundaries, causing lower teeth to shrink, alignment to fail, and facial identity to warp.
+* **Verdict**: ❌ **Unsuitable on its own for realistic try-on.**
+
+---
+
+### 3. AI-Constrained (ControlNet / LORA / S²Edit)
+* **How it works**: Standard diffusion models guided by a structure map (e.g., Canny edges, depth map, or facial landmarks).
+* **Why it is better**: It forces the AI to follow the outline of the user's original teeth.
+* **Limitations**: While shape boundaries are preserved, the AI cannot easily reshape teeth to look like real veneers (e.g., closing gaps or making teeth wider) because it is constrained *only* by the original edges.
+* **Verdict**: ⚠️ **Good for simple whitening, but poor for structural veneer design.**
+
+---
+
+### 4. Deterministic-First Hybrid (Warping + AI Shading) — ⭐ RECOMMENDED BEST APPROACH
+* **How it works**: We split the design process into two distinct stages:
+  1. **Geometry & Shape (Deterministic)**: We segment the teeth, overlay a standardized dental template (e.g., oval, square, or natural veneer shapes), and warp the teeth to the planned size and alignment using **Thin Plate Spline (TPS)**.
+  2. **Texture & Realism (AI)**: We pass the warped teeth image to the AI (using low denoising strength or ControlNet) to generate natural gloss, translucency, reflections, and shadowing.
+* **Why it is best**: This guarantees that the tooth sizes, biting lines, and alignments are 100% correct, while the AI only handles color correction and shading realism.
+* **Verdict**:  **The industry standard used by premium applications.**
+
+---
+
+## 🛣️ R&D Implementation Roadmap
+
+Follow this phased checklist to build the hybrid simulation pipeline:
+
+### 📍 Phase 1: Precise Segmentation & Masking
+- [ ] **Implement Lip Isolation**: Use **MediaPipe Face Mesh** to extract the inner lip coordinates using canonical indices:
+  * Upper Inner Lip: `[78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308]`
+  * Lower Inner Lip: `[308, 324, 318, 402, 317, 14, 87, 178, 88, 95, 78]`
+- [ ] **Teeth Segmenter**: Use a fast, zero-shot segmenter (like a cropped **MobileSAM** engine or a color-luminance threshold filter) to separate teeth from gums and cavities.
+- [ ] **Eroded Inner Mask**: Generate a mask that excludes gums and lips, leaving *only* the tooth surfaces.
+- [ ] **Unit Tests**: Run tests on 20 sample images to verify that lips and skin are never included in the mask.
+
+---
+
+### 📍 Phase 2: Veneer Placement & 2D Warping
+- [ ] **Select Dental Templates**: Standardize a set of 3 veneer templates (e.g., Hollywood, Natural, Oval shapes).
+- [ ] **Align Landmarks**: Match the corners and midlines of the user's teeth with the templates.
+- [ ] **Implement TPS Warping**: Use thin-plate spline (`skimage.transform.ThinPlateSplineTransform` in python, or a Javascript equivalent) to stretch and deform the veneer template pixels to match the user's mouth coordinates.
+- [ ] **Poisson Blending**: Composite the warped teeth back onto the face inside the lip mask using seamless Poisson blending to eliminate seams.
+
+---
+
+### 📍 Phase 3: AI Texture Refinement
+- [ ] **Modal GPU Setup**: Deploy **FLUX.1-Fill** or **SDXL ControlNet** on Modal serverless GPUs.
+- [ ] **Structure Retention Control**: Configure the model to run with a low denoising strength (e.g., 0.25 to 0.40) or feed it a structure constraint to maintain shape.
+- [ ] **Veneer Texture Prompting**: Craft prompts specifically for veneer features (e.g., `"high-gloss ceramic veneers, natural enamel translucency, studio lighting, highly detailed"`).
+- [ ] **Boundary Blending**: Apply a 3px Gaussian blur to the mask edges to blend the AI-generated veneers smoothly into the patient's real gums.
+
+---
+
+### 📍 Phase 4: Benchmarking & Launch
+- [ ] **Compile Test Set**: Set up 30 test smile photos with varying lighting, tooth shapes, and skin tones.
+- [ ] **Evaluate Size Drift**: Measure original bottom teeth height vs. generated bottom teeth height (should have <5% drift).
+- [ ] **Evaluate Color Shifts**: Verify that the skin tone surrounding the mouth remains identical after generation.
+- [ ] **User Acceptance Review**: Grade the generated previews for realistic translucency and shadow alignment.
+
+---
+
+## 🛡️ Critical Risks & Abatement Strategies
+
+* **Risk**: High latency during AI inpainting on server.
+  * **Solution**: Run the heavy segmentation and warping steps locally on the client or fast CPU server, and invoke the GPU pipeline *only* for the final texture pass.
+* **Risk**: Gum lines looking artificial or cut off.
+  * **Solution**: Implement accurate color checks (`isReddish`) in the mask generator to protect natural gums from being overwritten by the veneer mask.

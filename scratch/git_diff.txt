@@ -1,0 +1,265 @@
+diff --git a/lib/gradioAdapter.ts b/lib/gradioAdapter.ts
+index 12c9920..6f4a857 100644
+--- a/lib/gradioAdapter.ts
++++ b/lib/gradioAdapter.ts
+@@ -184,26 +184,91 @@ async function compositeInpaintedResult(
+     w: number,
+     h: number
+ ): Promise<Buffer> {
+-    const alphaMaskBuf = await sharp(flatMaskBuf)
++    // Step 1: Erode the mask slightly (2px) before blurring to push blend boundary
++    // inward — prevents teeth-edge artifacts leaking onto skin/lips
++    const erodedMaskBuf = await sharp(flatMaskBuf)
+         .greyscale()
+         .resize(w, h, { fit: 'fill' })
+-        .blur(3)
+-        .extractChannel(0)
++        .threshold(200) // Clean up to pure black/white before erosion
+         .raw()
+         .toBuffer();
+ 
++    // Manual 2px erosion: pixel is white only if all neighbors within 2px are white
++    const eroded = Buffer.alloc(w * h);
++    const erosionRadius = 2;
++    for (let y = 0; y < h; y++) {
++        for (let x = 0; x < w; x++) {
++            let allWhite = true;
++            for (let dy = -erosionRadius; dy <= erosionRadius && allWhite; dy++) {
++                for (let dx = -erosionRadius; dx <= erosionRadius && allWhite; dx++) {
++                    const nx = x + dx;
++                    const ny = y + dy;
++                    if (nx < 0 || nx >= w || ny < 0 || ny >= h) {
++                        allWhite = false;
++                    } else if (erodedMaskBuf[ny * w + nx] < 128) {
++                        allWhite = false;
++                    }
++                }
++            }
++            eroded[y * w + x] = allWhite ? 255 : 0;
++        }
++    }
++
++    // Step 2: Apply stronger Gaussian blur (sigma 6) for smoother feathered edges
++    const alphaMaskBuf = await sharp(eroded, { raw: { width: w, height: h, channels: 1 } })
++        .blur(6)
++        .raw()
++        .toBuffer();
++
++    // Step 3: Upscale AI-generated image to original resolution
+     const upscaledGeneratedBuf = await sharp(generatedBuf)
+         .resize(w, h, { fit: 'fill', kernel: 'lanczos3' })
+         .ensureAlpha()
+         .raw()
+         .toBuffer();
+ 
++    // Step 4: Read original image pixels for luminance matching at boundaries
++    const originalRaw = await sharp(originalImageBuf)
++        .ensureAlpha()
++        .raw()
++        .toBuffer();
++
++    // Step 5: Composite with luminance matching at boundary pixels
+     const rgbaBuffer = Buffer.alloc(w * h * 4);
+     for (let i = 0; i < w * h; i++) {
+-        rgbaBuffer[i * 4] = upscaledGeneratedBuf[i * 4];
+-        rgbaBuffer[i * 4 + 1] = upscaledGeneratedBuf[i * 4 + 1];
+-        rgbaBuffer[i * 4 + 2] = upscaledGeneratedBuf[i * 4 + 2];
+-        rgbaBuffer[i * 4 + 3] = alphaMaskBuf[i];
++        const alpha = alphaMaskBuf[i];
++        const genR = upscaledGeneratedBuf[i * 4];
++        const genG = upscaledGeneratedBuf[i * 4 + 1];
++        const genB = upscaledGeneratedBuf[i * 4 + 2];
++
++        // At boundary pixels (partially transparent), match luminance to reduce
++        // visible color discontinuities between generated teeth and original skin
++        if (alpha > 10 && alpha < 240) {
++            const origR = originalRaw[i * 4];
++            const origG = originalRaw[i * 4 + 1];
++            const origB = originalRaw[i * 4 + 2];
++            const origLum = 0.2126 * origR + 0.7152 * origG + 0.0722 * origB;
++            const genLum = 0.2126 * genR + 0.7152 * genG + 0.0722 * genB;
++
++            if (genLum > 1) {
++                const lumRatio = Math.min(1.3, Math.max(0.7, origLum / genLum));
++                // Blend factor: how much luminance correction to apply (stronger near edges)
++                const edgeness = 1 - Math.abs(alpha - 128) / 128; // peaks at alpha=128
++                const correction = 1 + (lumRatio - 1) * edgeness * 0.5;
++                rgbaBuffer[i * 4] = Math.min(255, Math.round(genR * correction));
++                rgbaBuffer[i * 4 + 1] = Math.min(255, Math.round(genG * correction));
++                rgbaBuffer[i * 4 + 2] = Math.min(255, Math.round(genB * correction));
++            } else {
++                rgbaBuffer[i * 4] = genR;
++                rgbaBuffer[i * 4 + 1] = genG;
++                rgbaBuffer[i * 4 + 2] = genB;
++            }
++        } else {
++            rgbaBuffer[i * 4] = genR;
++            rgbaBuffer[i * 4 + 1] = genG;
++            rgbaBuffer[i * 4 + 2] = genB;
++        }
++        rgbaBuffer[i * 4 + 3] = alpha;
+     }
+ 
+     const maskedGeneratedImg = await sharp(rgbaBuffer, {
+@@ -1483,12 +1548,15 @@ async function runFluxHFModel(
+ 
+     await writeDebugImage('04-flux-hf-output', hfGeneratedDataUrl);
+ 
+-    // Resize model output directly to the original dimensions to bypass post-processing blending
++    // Blending generated veneers back onto the original high-resolution image using the mask
+     const generatedBuf = parseDataUrl(hfGeneratedDataUrl).buffer;
+-    const finalCompositedBuf = await sharp(generatedBuf)
+-        .resize(origW, origH, { fit: 'fill', kernel: 'lanczos3' })
+-        .webp({ quality: 95 })
+-        .toBuffer();
++    const finalCompositedBuf = await compositeInpaintedResult(
++        originalImageBuf,
++        generatedBuf,
++        flatMaskBuffer,
++        origW,
++        origH
++    );
+ 
+     const finalDataUrl = toDataUrl('image/webp', finalCompositedBuf);
+     await writeDebugImage('05-hf-final-composite', finalDataUrl);
+@@ -1585,23 +1653,23 @@ async function runFluxModalModel(
+     // Build dental-specific prompt
+     const analysisInstruction =
+         analysis.mode === 'reconstruct'
+-            ? 'Reconstruct missing or broken teeth with realistic anatomy and preserve smile geometry.'
++            ? 'Reconstruct missing or broken teeth with realistic anatomy.'
+             : analysis.mode === 'restore'
+-                ? 'Restore misalignment, chips, and discoloration while preserving natural lip contour.'
+-                : 'Apply subtle, realistic veneer improvements while keeping existing expression unchanged.';
++                ? 'Restore misalignment, chips, and discoloration.'
++                : 'Apply subtle, realistic veneer improvements.';
+     const defectInstruction = buildDefectInstruction(analysis.defects);
+ 
+     const prompt = [
+-        'Photorealistic dental inpainting.',
+-        'Align, restore, and whiten teeth strictly within the masked region.',
+-        'Do not modify the shape of the mouth, lips, or surrounding face.',
+-        'Keep lips, tongue, gums outside the mask, skin texture, lighting, expression, and background 100% unchanged, authentic, and seamlessly blended.',
++        'Photorealistic dental photography, 8k macro detail.',
++        'Generate perfectly aligned, bright white porcelain veneers in the masked teeth region.',
++        'Seamless edge blending: generated teeth must have smooth color and luminance transitions at mask boundaries with zero visible seams.',
++        'Preserve exact lip shape, gum contour, tongue, skin texture, lighting, expression, and background.',
+         analysisInstruction,
+         defectInstruction,
+         attempt.boost,
+     ].join(' ');
+ 
+-    const fluxGuidance = clamp(tuned.guidance * 3.0, 15.0, 35.0);
++    const fluxGuidance = clamp(tuned.guidance * 3.0, 15.0, 30.0);
+     const fluxSteps = clamp(tuned.steps, 20, 28);
+ 
+     const endpoint = 'https://harunshaikh270599--dreamsmile-flux-fluxinpaint-inpaint.modal.run';
+@@ -1638,12 +1706,15 @@ async function runFluxModalModel(
+     const modalOutputDataUrl = `data:image/webp;base64,${result.image}`;
+     await writeDebugImage('04-flux-modal-output', modalOutputDataUrl);
+ 
+-    // Resize model output directly to the original dimensions to bypass post-processing blending
++    // Blending generated veneers back onto the original high-resolution image using the mask
+     const generatedBuf = parseDataUrl(modalOutputDataUrl).buffer;
+-    const finalCompositedBuf = await sharp(generatedBuf)
+-        .resize(origW, origH, { fit: 'fill', kernel: 'lanczos3' })
+-        .webp({ quality: 95 })
+-        .toBuffer();
++    const finalCompositedBuf = await compositeInpaintedResult(
++        originalImageBuf,
++        generatedBuf,
++        compositedMask,
++        origW,
++        origH
++    );
+ 
+     const finalDataUrl = toDataUrl('image/webp', finalCompositedBuf);
+     await writeDebugImage('05-final-composite', finalDataUrl);
+diff --git a/public/flux_result_512.png b/public/flux_result_512.png
+index 6d93502..bda0c8d 100644
+Binary files a/public/flux_result_512.png and b/public/flux_result_512.png differ
+diff --git a/public/flux_result_512.webp b/public/flux_result_512.webp
+index 970b79a..422f91e 100644
+Binary files a/public/flux_result_512.webp and b/public/flux_result_512.webp differ
+diff --git a/public/test-local-output.webp b/public/test-local-output.webp
+index 827327a..fa654cd 100644
+Binary files a/public/test-local-output.webp and b/public/test-local-output.webp differ
+diff --git a/test-flux-gradio.mjs b/test-flux-gradio.mjs
+index ddbc714..ab2fbb5 100644
+--- a/test-flux-gradio.mjs
++++ b/test-flux-gradio.mjs
+@@ -108,8 +108,24 @@ async function run() {
+         const client = await Client.connect(HF_SPACE, connectOptions);
+         console.log('Connected. Config:', JSON.stringify(client.config).substring(0, 500));
+         
+-        // Let's print out the available endpoints
+-        // console.log('Endpoints:', client.config.dependencies);
++        console.log('Running prediction...');
++        const response = await client.predict('/infer', {
++            edit_images: {
++                background: imageBlob,
++                layers: [maskBlob],
++                composite: null
++            },
++            prompt: 'beautiful white veneers teeth smile, highly detailed dental work',
++            seed: 0,
++            randomize_seed: true,
++            width: 1024,
++            height: 1024,
++            guidance_scale: 30,
++            num_inference_steps: 28
++        });
++
++        console.log('Prediction success!');
++        console.log('Response structure:', JSON.stringify(response, null, 2));
+     } catch (err) {
+         console.error('Connection/Execution failed:', err);
+     }
+diff --git a/utils/masking.ts b/utils/masking.ts
+index fb988c6..23d7f0c 100644
+--- a/utils/masking.ts
++++ b/utils/masking.ts
+@@ -12,18 +12,34 @@ async function getFaceLandmarker(modelsPath: string = '/models'): Promise<any> {
+     // Dynamic import to avoid SSR errors during Next.js build / server execution
+     const { FilesetResolver, FaceLandmarker } = await import('@mediapipe/tasks-vision');
+     
+-    const wasmUrl = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8/wasm';
++    // WASM version MUST match the installed @mediapipe/tasks-vision package version (0.10.35)
++    const wasmUrl = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm';
+     const filesetResolver = await FilesetResolver.forVisionTasks(wasmUrl);
+     const modelAssetPath = `${modelsPath}/face_landmarker.task`;
+ 
+-    faceLandmarkerInstance = await FaceLandmarker.createFromOptions(filesetResolver, {
+-        baseOptions: {
+-            modelAssetPath: modelAssetPath,
+-            delegate: 'GPU',
+-        },
+-        runningMode: 'IMAGE',
+-        numFaces: 1,
+-    });
++    // Try GPU first for best performance, fall back to CPU for mobile/low-end devices
++    try {
++        faceLandmarkerInstance = await FaceLandmarker.createFromOptions(filesetResolver, {
++            baseOptions: {
++                modelAssetPath: modelAssetPath,
++                delegate: 'GPU',
++            },
++            runningMode: 'IMAGE',
++            numFaces: 1,
++        });
++        console.log('[FaceLandmarker] Initialized with GPU delegate.');
++    } catch (gpuError) {
++        console.warn('[FaceLandmarker] GPU delegate failed, falling back to CPU:', gpuError);
++        faceLandmarkerInstance = await FaceLandmarker.createFromOptions(filesetResolver, {
++            baseOptions: {
++                modelAssetPath: modelAssetPath,
++                delegate: 'CPU',
++            },
++            runningMode: 'IMAGE',
++            numFaces: 1,
++        });
++        console.log('[FaceLandmarker] Initialized with CPU delegate (fallback).');
++    }
+     
+     return faceLandmarkerInstance;
+ }

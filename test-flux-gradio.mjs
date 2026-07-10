@@ -108,8 +108,24 @@ async function run() {
         const client = await Client.connect(HF_SPACE, connectOptions);
         console.log('Connected. Config:', JSON.stringify(client.config).substring(0, 500));
         
-        // Let's print out the available endpoints
-        // console.log('Endpoints:', client.config.dependencies);
+        console.log('Running prediction...');
+        const response = await client.predict('/infer', {
+            edit_images: {
+                background: imageBlob,
+                layers: [maskBlob],
+                composite: null
+            },
+            prompt: 'beautiful white veneers teeth smile, highly detailed dental work',
+            seed: 0,
+            randomize_seed: true,
+            width: 1024,
+            height: 1024,
+            guidance_scale: 30,
+            num_inference_steps: 28
+        });
+
+        console.log('Prediction success!');
+        console.log('Response structure:', JSON.stringify(response, null, 2));
     } catch (err) {
         console.error('Connection/Execution failed:', err);
     }

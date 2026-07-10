@@ -10,17 +10,6 @@
 - **Description:** Hugging Face Space connections can timeout (ETIMEDOUT / fetch failed)
 - **Mitigation:** Global fetch interceptor with 5 retries + 2s delay already active in gradioAdapter.ts
  
-### ISSUE-004: Insufficient Tooth Straightening / Veneer Alignment Quality
-- **Severity:** HIGH
-- **Status:** ACTIVE
-- **Description:** Generated veneers are not sufficiently straightened; crooked and overlapping tooth geometries in the original image are preserved in the output rather than being transformed into a perfect "Hollywood dream smile" aesthetic.
-- **Root Cause:**
-  1. **Overly Restrictive Prompts:** Prompt directives like "preserve smile geometry" or "preserve natural lip contour" overly constrain FLUX's generative capacity, forcing it to stick to the original tooth outlines.
-  2. **Tight Mask Boundaries:** The mask contours may be too restrictive, leaving no space for the model to re-align or expand the teeth boundaries without violating the mask edges.
-  3. **Lack of Strength Control:** The FLUX.1 Fill Space API lacks a standard denoise strength parameter, causing it to rely strictly on the mask and text prompt alignment.
-- **Proposed Remediation:**
-  1. Simplify and refine prompts to explicitly instruct straightening: "perfectly straight, aligned, white Hollywood veneers".
-  2. Test a wider dentition-masking technique that covers the whole dental arch, giving the model more space to redraw teeth positions.
 
 ### BYPASS-001: Preflight Validation Disabled (Local Development)
 - **Severity:** NONE (Intentional)
@@ -85,5 +74,16 @@
 - **Description:** AI-generated teeth appeared jagged, pointed, or cut off ("piranha teeth"), and natural gums were aggressively erased during mask processing.
 - **Root Cause:** The `applyLipSafeMaskCleanup` logic used rough chroma checks (`chr > 55`) that misclassified gums and teeth edges as lips, deleting them from the mask. Reverting occurred due to an aggressive 30% survival threshold, and the 0.24 blur sigma was below sharp's warning limit. Additionally, `adaptMaskForAnalysis`'s output was not being piped to the inpainting model, and closeups were rejected due to a low 38% maximum coverage cap.
 - **Fix:** Refined color classification (`isReddish`, `toothLike`, `cavityLike`), lowered survival limit to 0.05, and bumped blur sigma to 0.3. Raised closeup coverage caps (to 80% for `teeth_only` / 50% for `mouth_closeup`) and ensured `adaptMaskForAnalysis`'s output is passed to the inpainting model inside `generateVeneerImage`.
+
+### RESOLVED-010: Insufficient Tooth Straightening & Veneer Alignment Quality
+- **Fixed:** 2026-07-09
+- **Description:** Generated veneers did not align or straighten crooked teeth, fangs (ectopic canines), or preserve biting edges, adhering strictly to old contours.
+- **Root Cause:** Overly restrictive prompts (e.g. "preserve smile geometry") and geometric mask constraints collapsed on closed/narrow mouths or cropped out corners.
+- **Fix:** 
+  1. Calculated total mouth height (`outerH`) and implemented effective height scaling `effectiveH = Math.max(innerH, outerH * 0.45)` to prevent boundary collapse.
+  2. Multiplied arch and cavity radii by `effectiveH`, and increased center-band vertical clamp to `Math.max(15, innerH * 1.35, outerH * 0.55)` to cover fangs and full teeth height.
+  3. Replaced restrictive prompts with explicit high-quality veneer alignment directives ("perfectly aligned, bright white porcelain veneers", "8k macro detail").
+  4. Eroded the mask by 2px and applied Gaussian blur (2.5) post-inpainting to resolve edge seams and ghosting.
+
 
 

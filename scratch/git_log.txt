@@ -1,0 +1,35 @@
+commit 7a27a66787422cfcb591b64e230bb8b235588801
+Author: harunali86 <whatcolorown@gmail.com>
+Date:   Fri Jul 3 17:59:03 2026 +0530
+
+    fix: resolve huggingface quota errors by switching to modal gpu as primary provider and implement provider fallback logic
+
+commit 15362308d8c34cf5f02b5b3b5f0b1f44795ab8e3
+Author: harunali86 <whatcolorown@gmail.com>
+Date:   Wed Jul 1 13:33:00 2026 +0530
+
+    feat: migrate mouth masking from face-api.js to client-side MediaPipe tasks-vision
+
+commit 3b8163a6e9a5b0f6cf66c30d2678b0cf6fffcb74
+Author: harunali86 <whatcolorown@gmail.com>
+Date:   Wed Jul 1 12:49:09 2026 +0530
+
+    feat(masking): expand geometric mouth mask and update veneer profiles
+
+commit 97c0be9208215c5fa6a3dfa83d56d1bc9fe62f3e
+Author: harunali86 <whatcolorown@gmail.com>
+Date:   Thu Jun 25 12:14:47 2026 +0530
+
+    feat(gradio): update Gradio API to v2.x Blobs and optimize mouth masks
+
+commit 12c8f277d5788c56e5c3d6fb79fa522153a75770
+Author: harunali86 <whatcolorown@gmail.com>
+Date:   Fri Jun 5 16:08:40 2026 +0530
+
+    feat: stabilize dental inpainting with native FLUX.1 Fill & closeup mouth fallback
+
+commit a18937efb34b2654131c7cb03f34047e8d8f21ed
+Author: harunali86 <whatcolorown@gmail.com>
+Date:   Tue Feb 10 14:04:55 2026 +0530
+
+    Initial commit from Create Next App

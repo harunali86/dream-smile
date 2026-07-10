@@ -1,0 +1,41 @@
+# ⏱️ 5-Minute Deep Research Plan
+
+This document outlines the exact search queries, technical resources, and evaluation parameters we will investigate to identify the optimal hybrid or API-driven pipeline for our **dental veneer preview** system.
+
+---
+
+## 🔍 Research Area 1: Commercial Dental & Smile Design APIs
+
+* We will investigate commercial API options to see if we can use an established, out-of-the-box solution for shape-accurate veneer mapping.
+* **Target Services**:
+  * [ ] **Dentrino / Dentrino Smile API**: Verify documentation, endpoints, latency, and costs.
+  * [ ] **SmileCloud API**: Check if they offer direct REST APIs for 2D veneer rendering/try-on.
+  * [ ] **Diagnocat / SmileFy**: Investigate API endpoints for developers.
+
+---
+
+## 💻 Research Area 2: Open-Source Segmentation & Landmark Extraction
+
+* We will research state-of-the-art libraries to segment teeth, gums, and lips.
+* **Target Technologies**:
+  * [ ] **MediaPipe Face Mesh**: Locate tooth/lip boundary mapping models and Python/JS coordinates extraction.
+  * [ ] **Segment Anything Model (SAM)**: Evaluate fine-tuned models like **Tooth-SAM** or **Teeth-SAM** for precise polygon mask extraction.
+  * [ ] **U-Net / OpenCV thresholding**: Verify fallback methods for zero-shot localized color/shape masking.
+
+---
+
+## 📐 Research Area 3: B-Spline & Thin Plate Spline (TPS) Warping
+
+* We will search for standard algorithms to warp 2D veneers onto user teeth coordinates.
+* **Target Libraries**:
+  * [ ] **SciPy (skimage.transform.ThinPlateSplineTransform)**: Check performance and sample implementations in Python.
+  * [ ] **JavaScript TPS options**: Search for fast client-side browser warping wrappers.
+
+---
+
+## 🎨 Research Area 4: AI-Constrained Inpainting (ControlNet & SDXL)
+
+* We will check how to constrain diffusion models (like FLUX.1-Fill or Stable Diffusion XL) using Canny edges, depth, or custom ControlNet weights to avoid teeth shape drift.
+* **Target Search**:
+  * [ ] **ControlNet-Teeth**: Search HuggingFace/GitHub for models trained specifically on teeth/mouth regions.
+  * [ ] **FLUX Inpainting settings**: Optimize denoising thresholds to maintain identity while improving color.

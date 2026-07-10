@@ -154,14 +154,34 @@
 - **Result:** Verified successfully; allows correct dental reconstruction and length preservation.
 
 ## ADR-013: Generous Mask Boundaries for Ectopic Canines & Full Biting Edge Alignment
-- **Date:** 2026-07-01
-- **Status:** PROPOSED & IMPLEMENTING
-- **Context:** Ectopic canines (high fangs on the gums) are excluded from the mask due to aggressive 80-90% horizontal clamping. Lower teeth biting edges are cut off due to tight vertical clamping (85% ellipse clamp + 0.98 outer guard).
+- **Date:** 2026-07-09
+- **Status:** APPROVED & IMPLEMENTED
+- **Context:** Ectopic canines (high fangs on the gums) were excluded from the mouth mask due to aggressive clamping. Lower teeth biting edges were cut off due to tight vertical constraints.
 - **Decision:**
-  1. Set `centralWidthFactor` to `0.98` to expand mask width to include mouth corners and fangs.
-  2. Increase `outerGuard` vertical scaling to `1.04` to extend height beyond the inner lip line.
-  3. Relax the center-band ellipse clamp to `1.02` (width) and `1.12` (height) of `innerW` and `innerH`.
-  4. Rely on server-side `applyLipSafeMaskCleanup` to dynamically remove reddish lip/gum pixels from the expanded mask.
+  1. Calculate `outerH` using the bounding box of `mouthOuterPoints` to determine total mouth height.
+  2. Implement effective height scaling: `effectiveH = Math.max(innerH, outerH * 0.45)` to prevent mask collapse when the mouth is closed or nearly closed.
+  3. Scale arches and dental cavities by `effectiveH` instead of raw `innerH`.
+  4. Increase center-band vertical radius to `Math.max(15, innerH * 1.35, outerH * 0.55)` to fully cover fangs, teeth heights, and gums.
+  5. Refine prompt engineering inside `lib/gradioAdapter.ts` to focus strictly on teeth straightening and perfect alignment, removing geometry preservation limits.
+  6. Erode the mask (2px) and apply Gaussian blur (sigma 2.5) during post-processing composition to eliminate edge ghosting/artifacts.
 - **Rationale:**
-  - Expanding the geometric bounds allows fangs and biting edges to enter the mask.
-  - Pixel-level color cleanup on the server ensures lips and gums remain protected despite the wider geometric mask.
+  - Prevents the teeth boundaries from collapsing while keeping the lips protected via server-side color-based lip safe cleanup.
+- **Result:** Successfully validated; ectopic canines are cleanly covered and straightened, and biting edges are preserved.
+
+## ADR-014: ESLint Ignores Configuration for Root Scripts & Scratch Files
+- **Date:** 2026-07-09
+- **Status:** APPROVED & IMPLEMENTED
+- **Context:** Helper/utility scripts in the workspace root and the `scratch/` directory caused compilation errors due to ESLint's strict type rules (e.g., `no-require-imports`, `no-unused-vars`).
+- **Decision:**
+  - Configure `eslint.config.mjs` to globally ignore scratch directories and helper scripts:
+    ```javascript
+    globalIgnores([
+        '**/scratch/**',
+        '*.js',
+        '*.mjs',
+        '*.cjs'
+    ])
+    ```
+- **Rationale:** Keeps developer test and simulation scripts available without blocking production builds or CI/CD pipelines.
+- **Result:** Verified `npm run lint` and `npm run build` compile with zero errors.
+

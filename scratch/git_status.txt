@@ -1,0 +1,27 @@
+On branch main
+Your branch is up to date with 'origin/main'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   lib/gradioAdapter.ts
+	modified:   public/flux_result_512.png
+	modified:   public/flux_result_512.webp
+	modified:   public/test-local-output.webp
+	modified:   test-flux-gradio.mjs
+	modified:   utils/masking.ts
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	scratch/analyze-debug-mask.mjs
+	scratch/check-composite-details.mjs
+	scratch/check-gradio-config.mjs
+	scratch/check-image-diffs.mjs
+	scratch/git_status.txt
+	scratch/inspect-teeth-colors.mjs
+	scratch/simulate-adapt.mjs
+	scratch/test-gradio-direct.mjs
+	scratch/visualize-input.mjs
+	scratch/visualize-mask.mjs
+
+no changes added to commit (use "git add" and/or "git commit -a")

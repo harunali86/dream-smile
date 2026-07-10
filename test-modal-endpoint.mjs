@@ -6,6 +6,7 @@ import dns from 'node:dns';
 // Intercept DNS resolution for Modal domains to force IPv4 and prevent ETIMEDOUT errors
 if (!globalThis.__dns_modal_intercepted__) {
     const originalLookup = dns.lookup;
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
     // @ts-ignore
     dns.lookup = function(hostname, options, callback) {
         if (typeof options === 'function') {
